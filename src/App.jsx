@@ -11,6 +11,7 @@ import {
 } from "firebase/firestore";
 import {
   Brain,
+  ChevronRight,
   Clock,
   Flame,
   Play,
@@ -20,12 +21,11 @@ import {
   Trophy,
   Users,
   Zap,
-  ChevronRight,
-  Layers3,
-  Orbit,
-  Wand2,
 } from "lucide-react";
 
+// --------------------------------------------------
+// FIREBASE
+// --------------------------------------------------
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -41,6 +41,9 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+// --------------------------------------------------
+// SABİTLER
+// --------------------------------------------------
 const PHASES = {
   LOBBY: "lobby",
   VOTING: "voting",
@@ -52,9 +55,9 @@ const PHASES = {
 };
 
 const TIMES = {
-  VOTING: 10,
-  REVEAL: 5,
-  SCOREBOARD: 5,
+  VOTING: 8,
+  REVEAL: 4,
+  SCOREBOARD: 4,
 };
 
 const CATEGORIES = [
@@ -72,13 +75,14 @@ const CATEGORIES = [
 const AGE_BRACKETS = ["0-10", "11-20", "21-30", "31-40", "41-50", "51-60", "60+"];
 const ROUND_OPTIONS = [10, 20];
 
+// Daha enerjik / daha temiz sesler
 const SOUNDS = {
-  click: "https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3",
-  correct: "https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3",
-  wrong: "https://assets.mixkit.co/active_storage/sfx/2003/2003-preview.mp3",
-  tick: "https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3",
-  reveal: "https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3",
-  win: "https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3",
+  click: "https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3",
+  correct: "https://assets.mixkit.co/active_storage/sfx/2018/2018-preview.mp3",
+  wrong: "https://assets.mixkit.co/active_storage/sfx/2955/2955-preview.mp3",
+  tick: "https://assets.mixkit.co/active_storage/sfx/2569/2569-preview.mp3",
+  reveal: "https://assets.mixkit.co/active_storage/sfx/270/270-preview.mp3",
+  win: "https://assets.mixkit.co/active_storage/sfx/2006/2006-preview.mp3",
 };
 
 const playSound = (type) => {
@@ -88,11 +92,14 @@ const playSound = (type) => {
     const audio = new Audio(src);
     audio.volume = 0.35;
     audio.play().catch(() => {});
-  } catch {}
+  } catch {
+    //
+  }
 };
 
-// KENDİ BÜYÜK SORU HAVUZUNU BURAYA YAPIŞTIR.
-// Senin tüm listeyi buraya aynen koyman gerekiyor.
+// --------------------------------------------------
+// BURAYA SENİN TÜM BÜYÜK SORU HAVUZUN GELECEK
+// --------------------------------------------------
 const initialSeedQuestions = [
   
   {
@@ -2159,6 +2166,9 @@ const initialSeedQuestions = [
 ];
 
 
+// --------------------------------------------------
+// YARDIMCI FONKSİYONLAR
+// --------------------------------------------------
 const normalizeText = (value = "") =>
   value
     .toString()
@@ -2168,13 +2178,17 @@ const normalizeText = (value = "") =>
 
 const dedupeQuestions = (questions) => {
   const seen = new Set();
-  return questions.filter((q) => {
-    if (!q?.text || !Array.isArray(q?.options) || q.options.length !== 4) return false;
-    const textKey = normalizeText(q.text);
-    if (seen.has(textKey)) return false;
-    seen.add(textKey);
-    return true;
-  });
+  const result = [];
+
+  for (const q of questions) {
+    if (!q?.text || !Array.isArray(q?.options) || q.options.length !== 4) continue;
+    const key = normalizeText(q.text);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(q);
+  }
+
+  return result;
 };
 
 const mergeQuestionPools = (oldPool, newPool) => dedupeQuestions([...oldPool, ...newPool]);
@@ -2182,7 +2196,7 @@ const mergeQuestionPools = (oldPool, newPool) => dedupeQuestions([...oldPool, ..
 const buildUsedSummary = (pool, usedIds = []) =>
   pool
     .filter((q) => usedIds.includes(q.id))
-    .slice(-24)
+    .slice(-25)
     .map((q) => q.text)
     .join(" | ");
 
@@ -2192,53 +2206,77 @@ const getTargetDifficulty = (round) => {
   return 2;
 };
 
-const getQuestionTime = (maxRounds) => (maxRounds === 20 ? 12 : 15);
+const getQuestionTime = (maxRounds) => (maxRounds === 20 ? 11 : 14);
 
-const pickQuestion = ({ pool, category, ageBracket, usedIds, round }) => {
+const shuffleArray = (arr) => [...arr].sort(() => Math.random() - 0.5);
+
+// Kategori ve yaşa sıkı bağlı seçim
+const pickQuestion = ({ pool, category, ageBracket, usedIds = [], round }) => {
   const targetDifficulty = getTargetDifficulty(round);
-  const notUsed = pool.filter((q) => !usedIds.includes(q.id));
+  const unused = pool.filter((q) => !usedIds.includes(q.id));
 
-  const scoreQuestion = (q) => {
-    let score = 0;
-    if (q.ageBracket === ageBracket) score += 5;
-    if (category === "Karışık" || q.category === category || q.category === "Karışık") score += 4;
-    if (q.difficulty === targetDifficulty) score += 5;
-    else if (Math.abs((q.difficulty || 2) - targetDifficulty) === 1) score += 2;
-    return score;
-  };
+  let exact = unused.filter(
+    (q) =>
+      q.ageBracket === ageBracket &&
+      (category === "Karışık" ? true : q.category === category)
+  );
 
-  const sorted = [...notUsed]
-    .map((q) => ({ q, score: scoreQuestion(q) }))
-    .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score);
-
-  if (sorted.length > 0) {
-    const top = sorted.filter((item) => item.score === sorted[0].score).map((item) => item.q);
-    return top[Math.floor(Math.random() * top.length)];
+  if (exact.length === 0 && category === "Karışık") {
+    exact = unused.filter((q) => q.ageBracket === ageBracket);
   }
 
-  return notUsed[Math.floor(Math.random() * notUsed.length)] || null;
+  if (exact.length === 0) return null;
+
+  const scored = exact
+    .map((q) => {
+      let score = 0;
+      if ((q.difficulty || 2) === targetDifficulty) score += 5;
+      else if (Math.abs((q.difficulty || 2) - targetDifficulty) === 1) score += 2;
+      score += Math.random() * 3; // random katkı
+      return { q, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const bestScore = scored[0]?.score ?? 0;
+  const topCandidates = scored
+    .filter((item) => item.score >= bestScore - 1.5)
+    .map((item) => item.q);
+
+  return shuffleArray(topCandidates)[0] || null;
 };
 
-const generateQuestionsBatch = async ({ category, ageBracket, count, usedSummary, round }) => {
+// --------------------------------------------------
+// GEMINI
+// --------------------------------------------------
+const generateQuestionsBatch = async ({
+  category,
+  ageBracket,
+  count,
+  usedSummary,
+  round,
+}) => {
   if (!GEMINI_API_KEY) return [];
 
   const targetDifficulty = getTargetDifficulty(round);
+
   const prompt = `
 Sen profesyonel bir bilgi yarışması soru yazarı ve doğruluk editörüsün.
 
 ${count} adet Türkçe, 4 şıklı, çoktan seçmeli soru üret.
+
 Kurallar:
 - Kategori: ${category}
 - Yaş grubu: ${ageBracket}
 - Hedef zorluk: ${targetDifficulty}
-- Sorular doğru, net ve kısa olsun.
+- Sorular kısa, net, doğru ve tekrar etmeyen yapıda olsun.
 - explanationShort mutlaka dolu olsun.
-- correctIndex 0 ile 3 arasında olsun.
-- Aynı veya benzer soruları tekrar üretme.
-- Son kullanılan sorular: ${usedSummary || "Yok"}
+- correctIndex 0-3 arasında olsun.
+- Son kullanılan benzer sorular:
+${usedSummary || "Yok"}
 
-Sadece JSON ARRAY döndür. Markdown kullanma.
+Sadece JSON ARRAY döndür.
+Markdown, code block veya açıklama kullanma.
+
 Şema:
 [
   {
@@ -2251,9 +2289,12 @@ Sadece JSON ARRAY döndür. Markdown kullanma.
     "explanationShort": "",
     "tags": []
   }
-]`.trim();
+]
+`.trim();
 
   try {
+    console.log("Gemini çağrıldı:", { category, ageBracket, count, round });
+
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
@@ -2266,36 +2307,56 @@ Sadece JSON ARRAY döndür. Markdown kullanma.
       }
     );
 
-    if (!response.ok) return [];
+    if (!response.ok) {
+      console.error("Gemini response status:", response.status);
+      return [];
+    }
+
     const data = await response.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
     if (!text) return [];
 
     const parsed = JSON.parse(text);
     if (!Array.isArray(parsed)) return [];
 
-    return dedupeQuestions(
+    const questions = dedupeQuestions(
       parsed
-        .filter((q) => q?.text && Array.isArray(q?.options) && q.options.length === 4)
-        .map((q, i) => ({
+        .filter(
+          (q) =>
+            q?.text &&
+            Array.isArray(q?.options) &&
+            q.options.length === 4 &&
+            typeof q.correctIndex === "number"
+        )
+        .map((q, index) => ({
           ...q,
           category: q.category || category,
           ageBracket: q.ageBracket || ageBracket,
           difficulty: Number.isFinite(q.difficulty) ? q.difficulty : targetDifficulty,
-          explanationShort: q.explanationShort || "Bu soru için kısa açıklama bulunamadı.",
+          explanationShort:
+            q.explanationShort || "Bu soru için kısa açıklama bulunamadı.",
           tags: Array.isArray(q.tags) ? q.tags : [],
-          id: `Q_API_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}`,
+          id: `Q_API_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}`,
           source: "gemini",
         }))
     );
+
+    console.log("Gemini soruları:", questions);
+    return questions;
   } catch (err) {
     console.error("Gemini API Hatası:", err);
     return [];
   }
 };
 
+// --------------------------------------------------
+// UI KÜÇÜK BİLEŞENLER
+// --------------------------------------------------
 const GlassCard = ({ children, className = "" }) => (
-  <div className={`rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl shadow-[0_20px_80px_rgba(0,0,0,0.35)] ${className}`}>
+  <div
+    className={`rounded-[28px] border border-white/10 bg-white/5 backdrop-blur-xl shadow-[0_16px_60px_rgba(0,0,0,0.35)] ${className}`}
+  >
     {children}
   </div>
 );
@@ -2305,7 +2366,7 @@ const SelectChip = ({ active, onClick, children }) => (
     onClick={onClick}
     className={`rounded-2xl px-4 py-3 text-sm font-semibold transition-all duration-200 ${
       active
-        ? "bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 shadow-[0_0_25px_rgba(16,185,129,0.35)]"
+        ? "bg-gradient-to-r from-emerald-400 to-cyan-400 text-slate-950 shadow-[0_0_24px_rgba(34,211,238,0.28)]"
         : "bg-white/5 text-slate-300 hover:bg-white/10"
     }`}
   >
@@ -2313,6 +2374,27 @@ const SelectChip = ({ active, onClick, children }) => (
   </button>
 );
 
+const AppFrame = ({ children }) => (
+  <div className="min-h-dvh bg-[radial-gradient(circle_at_top,#102038_0%,#07101d_40%,#03060d_100%)] text-slate-100">
+    <div className="pointer-events-none fixed inset-0 overflow-hidden">
+      <div className="absolute left-[-10%] top-[-10%] h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl" />
+      <div className="absolute right-[-10%] top-20 h-72 w-72 rounded-full bg-emerald-500/10 blur-3xl" />
+      <div className="absolute bottom-0 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-indigo-500/10 blur-3xl" />
+    </div>
+
+    <div className="relative mx-auto min-h-dvh max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+      {children}
+    </div>
+
+    <footer className="relative border-t border-white/5 bg-black/10 py-3 text-center text-xs text-slate-400">
+      Powered by ForgeAndPlay • ForgeAndPlay tarafından yapılmıştır
+    </footer>
+  </div>
+);
+
+// --------------------------------------------------
+// APP
+// --------------------------------------------------
 export default function App() {
   const [user, setUser] = useState(null);
   const [userName, setUserName] = useState("");
@@ -2326,36 +2408,54 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState("");
   const [roundCount, setRoundCount] = useState(10);
   const [selectedAgeBracket, setSelectedAgeBracket] = useState("21-30");
-  const [localPool, setLocalPool] = useState(dedupeQuestions(initialSeedQuestions.map((q) => ({ ...q, source: "local" }))));
+
+  const [localPool, setLocalPool] = useState(
+    dedupeQuestions(initialSeedQuestions.map((q) => ({ ...q, source: "local" })))
+  );
 
   const canvasRef = useRef(null);
   const isTransitioningRef = useRef(false);
   const lastTickRef = useRef(null);
+  const nameInputRef = useRef(null);
 
   const myPlayer = useMemo(() => {
     if (!user || !roomData?.players) return null;
     return roomData.players[user.uid] || null;
   }, [user, roomData]);
 
+  // auth
   useEffect(() => {
     signInAnonymously(auth).catch((err) => {
       console.error(err);
       setErrorMessage("Firebase anonymous auth açılamadı.");
     });
+
     const unsub = onAuthStateChanged(auth, setUser);
     return () => unsub();
   }, []);
 
+  // input focus
+  useEffect(() => {
+    if (!roomId && !roomData) {
+      const t = setTimeout(() => nameInputRef.current?.focus(), 100);
+      return () => clearTimeout(t);
+    }
+  }, [roomId, roomData]);
+
+  // room listener
   useEffect(() => {
     if (!user || !roomId) return;
     const roomRef = doc(db, "rooms", roomId);
+
     const unsub = onSnapshot(roomRef, (docSnap) => {
       if (docSnap.exists()) setRoomData(docSnap.data());
       else setRoomData(null);
     });
+
     return () => unsub();
   }, [user, roomId]);
 
+  // game loop
   useEffect(() => {
     if (!roomData || !user) return;
     const isHost = roomData.hostId === user.uid;
@@ -2381,6 +2481,7 @@ export default function App() {
         } else if (roomData.state === PHASES.QUESTION) {
           const playerCount = Object.keys(roomData.players || {}).length;
           const answerCount = Object.keys(roomData.answers || {}).length;
+
           if (playerCount > 0 && answerCount >= playerCount) {
             isTransitioningRef.current = true;
             handlePhaseTransition(roomData).finally(() => {
@@ -2392,14 +2493,18 @@ export default function App() {
         }
       }
 
-      if (isHost && isDemo) simulateBots(roomData, remaining);
+      if (isHost && isDemo) {
+        simulateBots(roomData, remaining);
+      }
     }, 250);
 
     return () => clearInterval(interval);
   }, [roomData, user, isDemo, localPool]);
 
+  // sounds
   useEffect(() => {
     if (!roomData) return;
+
     if (roomData.state === PHASES.REVEAL) {
       const q = roomData.currentQuestion;
       const myAns = roomData.answers?.[user?.uid]?.optionIndex;
@@ -2407,8 +2512,11 @@ export default function App() {
         if (myAns === q.correctIndex) playSound("correct");
         else playSound("wrong");
       }
-    } else if (roomData.state === PHASES.END) playSound("win");
-    else if (roomData.state === PHASES.QUESTION) playSound("reveal");
+    } else if (roomData.state === PHASES.END) {
+      playSound("win");
+    } else if (roomData.state === PHASES.QUESTION) {
+      playSound("reveal");
+    }
   }, [roomData?.state, roomData, user]);
 
   useEffect(() => {
@@ -2416,6 +2524,7 @@ export default function App() {
       lastTickRef.current = null;
       return;
     }
+
     if (timeLeft <= 5 && timeLeft > 0 && lastTickRef.current !== timeLeft) {
       lastTickRef.current = timeLeft;
       playSound("tick");
@@ -2429,213 +2538,296 @@ export default function App() {
   const createRoom = async (demoMode = false) => {
     if (!user || !userName.trim()) return;
 
-    const newRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const roomRef = doc(db, "rooms", newRoomId);
-    const timePerQuestion = getQuestionTime(roundCount);
+    try {
+      setErrorMessage("");
+      const newRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const roomRef = doc(db, "rooms", newRoomId);
 
-    const initialPlayers = {
-      [user.uid]: { name: userName.trim(), score: 0, streak: 0, isBot: false, avatar: "😎" },
-    };
+      const initialPlayers = {
+        [user.uid]: {
+          name: userName.trim(),
+          score: 0,
+          streak: 0,
+          isBot: false,
+          avatar: "😎",
+        },
+      };
 
-    if (demoMode) {
-      ["Bot Alpha", "Bot Beta", "Bot Gamma"].forEach((name, i) => {
-        initialPlayers[`bot_${i}`] = { name, score: 0, streak: 0, isBot: true, avatar: "🤖" };
+      if (demoMode) {
+        ["Bot Alpha", "Bot Beta", "Bot Gamma"].forEach((name, i) => {
+          initialPlayers[`bot_${i}`] = {
+            name,
+            score: 0,
+            streak: 0,
+            isBot: true,
+            avatar: "🤖",
+          };
+        });
+      }
+
+      await setDoc(roomRef, {
+        id: newRoomId,
+        hostId: user.uid,
+        state: PHASES.LOBBY,
+        settings: {
+          ageBracket: selectedAgeBracket,
+          maxRounds: roundCount,
+          timePerQuestion: getQuestionTime(roundCount),
+        },
+        players: initialPlayers,
+        currentRound: 0,
+        phaseEndsAt: null,
+        currentQuestion: null,
+        currentQuestionSource: null,
+        votes: {},
+        answers: {},
+        usedIds: [],
+        createdAt: Date.now(),
       });
+
+      setIsDemo(demoMode);
+      setRoomId(newRoomId);
+    } catch (err) {
+      console.error(err);
+      setErrorMessage("Oda oluşturulamadı.");
     }
-
-    await setDoc(roomRef, {
-      id: newRoomId,
-      hostId: user.uid,
-      state: PHASES.LOBBY,
-      settings: {
-        ageBracket: selectedAgeBracket,
-        maxRounds: roundCount,
-        timePerQuestion,
-      },
-      players: initialPlayers,
-      currentRound: 0,
-      phaseEndsAt: null,
-      currentQuestion: null,
-      currentQuestionSource: null,
-      votes: {},
-      answers: {},
-      usedIds: [],
-      createdAt: Date.now(),
-    });
-
-    setIsDemo(demoMode);
-    setRoomId(newRoomId);
   };
 
   const joinRoom = async (idToJoin) => {
     if (!user || !userName.trim() || !idToJoin.trim()) return;
-    const formattedId = idToJoin.trim().toUpperCase();
-    const roomRef = doc(db, "rooms", formattedId);
-    const roomSnap = await getDoc(roomRef);
-    if (!roomSnap.exists()) {
-      setErrorMessage("Oda bulunamadı.");
-      return;
+
+    try {
+      setErrorMessage("");
+      const formattedId = idToJoin.trim().toUpperCase();
+      const roomRef = doc(db, "rooms", formattedId);
+      const roomSnap = await getDoc(roomRef);
+
+      if (!roomSnap.exists()) {
+        setErrorMessage("Oda bulunamadı.");
+        return;
+      }
+
+      await updateDoc(roomRef, {
+        [`players.${user.uid}`]: {
+          name: userName.trim(),
+          score: 0,
+          streak: 0,
+          isBot: false,
+          avatar: "🥸",
+        },
+      });
+
+      setRoomId(formattedId);
+      setIsDemo(false);
+    } catch (err) {
+      console.error(err);
+      setErrorMessage("Odaya katılırken hata oluştu.");
     }
-    await updateDoc(roomRef, {
-      [`players.${user.uid}`]: { name: userName.trim(), score: 0, streak: 0, isBot: false, avatar: "🥸" },
-    });
-    setRoomId(formattedId);
-    setIsDemo(false);
   };
 
   const handlePhaseTransition = async (room) => {
     const roomRef = doc(db, "rooms", room.id);
 
-    if (room.state === PHASES.LOBBY) {
-      await updateDoc(roomRef, {
-        state: PHASES.VOTING,
-        phaseEndsAt: Date.now() + TIMES.VOTING * 1000,
-        currentRound: 1,
-        votes: {},
-        answers: {},
-      });
-      return;
-    }
-
-    if (room.state === PHASES.VOTING) {
-      const voteCounts = {};
-      Object.values(room.votes || {}).forEach((v) => {
-        voteCounts[v] = (voteCounts[v] || 0) + 1;
-      });
-
-      let topCategory = "Karışık";
-      let maxVote = -1;
-      for (const [cat, count] of Object.entries(voteCounts)) {
-        if (count > maxVote) {
-          maxVote = count;
-          topCategory = cat;
-        }
-      }
-
-      const usedSummary = buildUsedSummary(localPool, room.usedIds || []);
-      let selectedQ = pickQuestion({
-        pool: localPool,
-        category: topCategory,
-        ageBracket: room.settings.ageBracket,
-        usedIds: room.usedIds || [],
-        round: room.currentRound || 1,
-      });
-
-      let source = selectedQ?.source || "local";
-
-      if ((!selectedQ || (room.currentRound || 1) > 4) && GEMINI_API_KEY && !isDemo) {
-        if (!selectedQ) {
-          await updateDoc(roomRef, { state: PHASES.LOADING_QUESTION, phaseEndsAt: null });
-        }
-
-        const generated = await generateQuestionsBatch({
-          category: topCategory,
-          ageBracket: room.settings.ageBracket,
-          count: 6,
-          usedSummary,
-          round: room.currentRound || 1,
-        });
-
-        if (generated.length > 0) {
-          const mergedPool = mergeQuestionPools(localPool, generated);
-          setLocalPool(mergedPool);
-          selectedQ = pickQuestion({
-            pool: mergedPool,
-            category: topCategory,
-            ageBracket: room.settings.ageBracket,
-            usedIds: room.usedIds || [],
-            round: room.currentRound || 1,
-          });
-          source = selectedQ?.source || "gemini";
-        }
-      }
-
-      if (!selectedQ) {
-        selectedQ = {
-          category: topCategory,
-          ageBracket: room.settings.ageBracket,
-          difficulty: getTargetDifficulty(room.currentRound || 1),
-          text: "Dünya'nın doğal uydusu hangisidir?",
-          options: ["Mars", "Ay", "Venüs", "Jüpiter"],
-          correctIndex: 1,
-          explanationShort: "Dünya'nın doğal uydusu Ay'dır.",
-          tags: ["uzay"],
-          id: `Q_FALLBACK_${Date.now()}`,
-          source: "fallback",
-        };
-        source = "fallback";
-      }
-
-      await updateDoc(roomRef, {
-        state: PHASES.QUESTION,
-        answers: {},
-        phaseEndsAt: Date.now() + room.settings.timePerQuestion * 1000,
-        currentQuestion: selectedQ,
-        currentQuestionSource: source,
-        usedIds: [...(room.usedIds || []), selectedQ.id],
-      });
-      return;
-    }
-
-    if (room.state === PHASES.QUESTION) {
-      const correctIdx = room.currentQuestion.correctIndex;
-      const newPlayers = { ...(room.players || {}) };
-      let firstCorrectId = null;
-      let fastestTime = Infinity;
-
-      Object.entries(room.answers || {}).forEach(([uid, ans]) => {
-        if (ans.optionIndex === correctIdx && ans.timeTaken < fastestTime) {
-          fastestTime = ans.timeTaken;
-          firstCorrectId = uid;
-        }
-      });
-
-      Object.entries(newPlayers).forEach(([uid, p]) => {
-        const ans = room.answers?.[uid];
-        if (!ans) {
-          newPlayers[uid].streak = 0;
-          return;
-        }
-        if (ans.optionIndex === correctIdx) {
-          const nextStreak = (p.streak || 0) + 1;
-          let pts = 100 + Math.floor(Math.max(0, room.settings.timePerQuestion - ans.timeTaken) * 3);
-          if (uid === firstCorrectId) pts += 30;
-          if (nextStreak >= 3) pts += 50;
-          newPlayers[uid].score += pts;
-          newPlayers[uid].streak = nextStreak;
-        } else newPlayers[uid].streak = 0;
-      });
-
-      await updateDoc(roomRef, {
-        state: PHASES.REVEAL,
-        phaseEndsAt: Date.now() + TIMES.REVEAL * 1000,
-        players: newPlayers,
-      });
-      return;
-    }
-
-    if (room.state === PHASES.REVEAL) {
-      await updateDoc(roomRef, {
-        state: PHASES.SCOREBOARD,
-        phaseEndsAt: Date.now() + TIMES.SCOREBOARD * 1000,
-      });
-      return;
-    }
-
-    if (room.state === PHASES.SCOREBOARD) {
-      if (room.currentRound >= room.settings.maxRounds) {
-        await updateDoc(roomRef, { state: PHASES.END, phaseEndsAt: null });
-      } else {
+    try {
+      if (room.state === PHASES.LOBBY) {
         await updateDoc(roomRef, {
           state: PHASES.VOTING,
           phaseEndsAt: Date.now() + TIMES.VOTING * 1000,
-          currentRound: room.currentRound + 1,
+          currentRound: 1,
           votes: {},
           answers: {},
-          currentQuestion: null,
-          currentQuestionSource: null,
         });
+        return;
       }
+
+      if (room.state === PHASES.VOTING) {
+        const voteCounts = {};
+        Object.values(room.votes || {}).forEach((v) => {
+          voteCounts[v] = (voteCounts[v] || 0) + 1;
+        });
+
+        let topCategory = "Karışık";
+        let maxVote = -1;
+
+        for (const [cat, count] of Object.entries(voteCounts)) {
+          if (count > maxVote) {
+            maxVote = count;
+            topCategory = cat;
+          }
+        }
+
+        const currentRound = room.currentRound || 1;
+        const usedSummary = buildUsedSummary(localPool, room.usedIds || []);
+
+        let selectedQ = pickQuestion({
+          pool: localPool,
+          category: topCategory,
+          ageBracket: room.settings.ageBracket,
+          usedIds: room.usedIds || [],
+          round: currentRound,
+        });
+
+        let source = selectedQ?.source || "local";
+
+        // Local soru azaldıysa veya hiç soru yoksa Gemini'den aynı kategori + aynı yaş için üret
+        const matchingUnusedCount = localPool.filter(
+          (q) =>
+            !(room.usedIds || []).includes(q.id) &&
+            q.ageBracket === room.settings.ageBracket &&
+            (topCategory === "Karışık" ? true : q.category === topCategory)
+        ).length;
+
+        if ((!selectedQ || matchingUnusedCount < 3) && GEMINI_API_KEY && !isDemo) {
+          if (!selectedQ) {
+            await updateDoc(roomRef, {
+              state: PHASES.LOADING_QUESTION,
+              phaseEndsAt: null,
+            });
+          }
+
+          const generated = await generateQuestionsBatch({
+            category: topCategory,
+            ageBracket: room.settings.ageBracket,
+            count: 6,
+            usedSummary,
+            round: currentRound,
+          });
+
+          if (generated.length > 0) {
+            const mergedPool = mergeQuestionPools(localPool, generated);
+            setLocalPool(mergedPool);
+
+            selectedQ = pickQuestion({
+              pool: mergedPool,
+              category: topCategory,
+              ageBracket: room.settings.ageBracket,
+              usedIds: room.usedIds || [],
+              round: currentRound,
+            });
+
+            source = selectedQ?.source || "gemini";
+          }
+        }
+
+        // Hâlâ yoksa sadece aynı kategori + aynı yaş grubundan tekrar kullan
+        if (!selectedQ) {
+          const exactReusable = localPool.filter(
+            (q) =>
+              q.ageBracket === room.settings.ageBracket &&
+              (topCategory === "Karışık" ? true : q.category === topCategory)
+          );
+
+          if (exactReusable.length > 0) {
+            selectedQ = shuffleArray(exactReusable)[0];
+            source = selectedQ?.source || "local-reuse";
+          }
+        }
+
+        // son çare
+        if (!selectedQ) {
+          selectedQ = {
+            category: topCategory === "Karışık" ? "Genel Kültür" : topCategory,
+            ageBracket: room.settings.ageBracket,
+            difficulty: getTargetDifficulty(currentRound),
+            text: "Dünya'nın doğal uydusu hangisidir?",
+            options: ["Mars", "Ay", "Venüs", "Jüpiter"],
+            correctIndex: 1,
+            explanationShort: "Dünya'nın doğal uydusu Ay'dır.",
+            tags: ["uzay"],
+            id: `Q_FALLBACK_${Date.now()}`,
+            source: "fallback",
+          };
+          source = "fallback";
+        }
+
+        console.log("Seçilen soru:", selectedQ);
+        console.log("Kaynak:", source);
+
+        await updateDoc(roomRef, {
+          state: PHASES.QUESTION,
+          answers: {},
+          phaseEndsAt: Date.now() + room.settings.timePerQuestion * 1000,
+          currentQuestion: selectedQ,
+          currentQuestionSource: source,
+          usedIds: [...(room.usedIds || []), selectedQ.id],
+        });
+
+        return;
+      }
+
+      if (room.state === PHASES.QUESTION) {
+        const correctIdx = room.currentQuestion.correctIndex;
+        const newPlayers = { ...(room.players || {}) };
+        let firstCorrectId = null;
+        let fastestTime = Infinity;
+
+        Object.entries(room.answers || {}).forEach(([uid, ans]) => {
+          if (ans.optionIndex === correctIdx && ans.timeTaken < fastestTime) {
+            fastestTime = ans.timeTaken;
+            firstCorrectId = uid;
+          }
+        });
+
+        Object.entries(newPlayers).forEach(([uid, p]) => {
+          const ans = room.answers?.[uid];
+          if (!ans) {
+            newPlayers[uid].streak = 0;
+            return;
+          }
+
+          if (ans.optionIndex === correctIdx) {
+            const nextStreak = (p.streak || 0) + 1;
+            let pts =
+              100 +
+              Math.floor(Math.max(0, room.settings.timePerQuestion - ans.timeTaken) * 3);
+
+            if (uid === firstCorrectId) pts += 30;
+            if (nextStreak >= 3) pts += 50;
+
+            newPlayers[uid].score += pts;
+            newPlayers[uid].streak = nextStreak;
+          } else {
+            newPlayers[uid].streak = 0;
+          }
+        });
+
+        await updateDoc(roomRef, {
+          state: PHASES.REVEAL,
+          phaseEndsAt: Date.now() + TIMES.REVEAL * 1000,
+          players: newPlayers,
+        });
+        return;
+      }
+
+      if (room.state === PHASES.REVEAL) {
+        await updateDoc(roomRef, {
+          state: PHASES.SCOREBOARD,
+          phaseEndsAt: Date.now() + TIMES.SCOREBOARD * 1000,
+        });
+        return;
+      }
+
+      if (room.state === PHASES.SCOREBOARD) {
+        if (room.currentRound >= room.settings.maxRounds) {
+          await updateDoc(roomRef, {
+            state: PHASES.END,
+            phaseEndsAt: null,
+          });
+        } else {
+          await updateDoc(roomRef, {
+            state: PHASES.VOTING,
+            phaseEndsAt: Date.now() + TIMES.VOTING * 1000,
+            currentRound: room.currentRound + 1,
+            votes: {},
+            answers: {},
+            currentQuestion: null,
+            currentQuestionSource: null,
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Transition error:", err);
+      setErrorMessage("Oyun geçişinde hata oluştu.");
     }
   };
 
@@ -2647,20 +2839,26 @@ export default function App() {
       for (const botId of bots) {
         if (!room.votes?.[botId] && Math.random() > 0.95) {
           await updateDoc(roomRef, {
-            [`votes.${botId}`]: CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)],
+            [`votes.${botId}`]:
+              CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)],
           });
         }
       }
-    }
-
-    if (room.state === PHASES.QUESTION) {
+    } else if (room.state === PHASES.QUESTION) {
       for (const botId of bots) {
         if (!room.answers?.[botId]) {
           const elapsed = Math.max(0, room.settings.timePerQuestion - remainingTime);
           if (elapsed >= 3 && Math.random() > 0.95) {
-            const ansIdx = Math.random() > 0.4 ? room.currentQuestion.correctIndex : Math.floor(Math.random() * 4);
+            const ansIdx =
+              Math.random() > 0.4
+                ? room.currentQuestion.correctIndex
+                : Math.floor(Math.random() * 4);
+
             await updateDoc(roomRef, {
-              [`answers.${botId}`]: { optionIndex: ansIdx, timeTaken: elapsed },
+              [`answers.${botId}`]: {
+                optionIndex: ansIdx,
+                timeTaken: elapsed,
+              },
             });
           }
         }
@@ -2671,11 +2869,20 @@ export default function App() {
   const submitVote = async (category) => {
     if (!roomData || roomData.state !== PHASES.VOTING || roomData.votes?.[user.uid]) return;
     playSound("click");
-    await updateDoc(doc(db, "rooms", roomData.id), { [`votes.${user.uid}`]: category });
+    await updateDoc(doc(db, "rooms", roomData.id), {
+      [`votes.${user.uid}`]: category,
+    });
   };
 
   const submitAnswer = async (index) => {
-    if (!roomData || roomData.state !== PHASES.QUESTION || roomData.answers?.[user.uid]) return;
+    if (
+      !roomData ||
+      roomData.state !== PHASES.QUESTION ||
+      roomData.answers?.[user.uid]
+    ) {
+      return;
+    }
+
     playSound("click");
     await updateDoc(doc(db, "rooms", roomData.id), {
       [`answers.${user.uid}`]: {
@@ -2686,60 +2893,63 @@ export default function App() {
   };
 
   const useJokerFiftyFifty = () => {
-    if (jokers.fiftyFifty <= 0 || roomData?.state !== PHASES.QUESTION || roomData.answers?.[user.uid]) return;
-    setJokers((p) => ({ ...p, fiftyFifty: 0 }));
+    if (
+      jokers.fiftyFifty <= 0 ||
+      roomData?.state !== PHASES.QUESTION ||
+      roomData.answers?.[user.uid]
+    ) {
+      return;
+    }
+
+    setJokers((prev) => ({ ...prev, fiftyFifty: 0 }));
+
     const hide = [0, 1, 2, 3]
       .filter((i) => i !== roomData.currentQuestion.correctIndex)
-      .sort(() => 0.5 - Math.random())
+      .sort(() => Math.random() - 0.5)
       .slice(0, 2);
+
     setHiddenOptions(hide);
   };
 
   const drawShareCard = () => {
     if (!canvasRef.current || !roomData || !user || !roomData.players?.[user.uid]) return;
+
     const ctx = canvasRef.current.getContext("2d");
     const p = roomData.players[user.uid];
+
+    ctx.clearRect(0, 0, 400, 250);
     ctx.fillStyle = "#07111f";
     ctx.fillRect(0, 0, 400, 250);
-    const g = ctx.createLinearGradient(0, 0, 400, 250);
-    g.addColorStop(0, "#10b981");
-    g.addColorStop(1, "#06b6d4");
-    ctx.fillStyle = g;
+
+    const gradient = ctx.createLinearGradient(0, 0, 400, 250);
+    gradient.addColorStop(0, "#22c55e");
+    gradient.addColorStop(1, "#06b6d4");
+
+    ctx.fillStyle = gradient;
     ctx.font = "bold 24px sans-serif";
-    ctx.fillText("ForgeAndPlay Quiz", 20, 40);
-    ctx.fillStyle = "white";
+    ctx.fillText("ForgeAndPlay Quiz", 20, 42);
+
+    ctx.fillStyle = "#ffffff";
     ctx.font = "20px sans-serif";
     ctx.fillText(`Oyuncu: ${p.name}`, 20, 90);
+
     ctx.fillStyle = "#fbbf24";
     ctx.font = "bold 36px sans-serif";
-    ctx.fillText(`${p.score} PUAN`, 20, 140);
+    ctx.fillText(`${p.score} PUAN`, 20, 144);
+
     ctx.fillStyle = "#cbd5e1";
     ctx.font = "16px sans-serif";
-    ctx.fillText(`Seri: ${p.streak} 🔥`, 20, 180);
+    ctx.fillText(`Seri: ${p.streak} 🔥`, 20, 182);
   };
 
   useEffect(() => {
     if (roomData?.state === PHASES.END) drawShareCard();
   }, [roomData?.state]);
 
-  const AppFrame = ({ children }) => (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,#14213b_0%,#090d18_35%,#05070d_100%)] text-slate-100 selection:bg-emerald-400/30">
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute left-[-10%] top-[-10%] h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl" />
-        <div className="absolute right-[-10%] top-20 h-72 w-72 rounded-full bg-emerald-500/10 blur-3xl" />
-        <div className="absolute bottom-0 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-indigo-500/10 blur-3xl" />
-      </div>
-      <div className="relative mx-auto min-h-screen max-w-7xl px-4 py-4 sm:px-6 lg:px-8">{children}</div>
-      <footer className="relative border-t border-white/5 bg-black/10 py-4 text-center text-xs text-slate-400">
-        Powered by ForgeAndPlay • ForgeAndPlay tarafından yapılmıştır
-      </footer>
-    </div>
-  );
-
   const Header = () => (
-    <GlassCard className="mb-6 p-4 sm:p-5">
+    <GlassCard className="mb-4 p-4 sm:mb-6 sm:p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 font-mono text-sm font-bold text-emerald-300">
             Oda: {roomData.id}
           </span>
@@ -2753,7 +2963,8 @@ export default function App() {
             Zorluk: {getTargetDifficulty(roomData.currentRound || 1)}
           </span>
         </div>
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+
+        <div className="flex items-center gap-2">
           <span className="text-xs uppercase tracking-[0.24em] text-slate-500">Skor</span>
           <span className="flex items-center gap-1 text-2xl font-black text-amber-300">
             {roomData.players[user.uid]?.score || 0} <Zap size={18} />
@@ -2763,10 +2974,13 @@ export default function App() {
     </GlassCard>
   );
 
+  // --------------------------------------------------
+  // RENDER
+  // --------------------------------------------------
   if (!user) {
     return (
       <AppFrame>
-        <div className="flex min-h-[85vh] items-center justify-center">
+        <div className="flex min-h-[82dvh] items-center justify-center">
           <GlassCard className="w-full max-w-md p-8 text-center">
             <Sparkles className="mx-auto mb-4 animate-spin text-emerald-400" size={42} />
             <div className="text-lg font-semibold">Bağlanıyor...</div>
@@ -2776,42 +2990,67 @@ export default function App() {
     );
   }
 
+  // giriş ekranı
   if (!roomId || !roomData) {
     return (
       <AppFrame>
-        <div className="flex min-h-[85vh] items-center justify-center">
-          <GlassCard className="w-full max-w-2xl overflow-hidden">
+        <div className="flex min-h-[82dvh] items-center justify-center">
+          <GlassCard className="w-full max-w-5xl overflow-hidden">
             <div className="grid lg:grid-cols-[1.05fr_0.95fr]">
-              <div className="border-b border-white/10 bg-gradient-to-br from-emerald-500/15 via-cyan-400/10 to-transparent p-8 lg:border-b-0 lg:border-r">
-                <div className="mb-6 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3">
+              <div className="hidden lg:block border-r border-white/10 bg-gradient-to-br from-emerald-500/15 via-cyan-400/10 to-transparent p-8">
+                <div className="mb-5 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3">
                   <Trophy className="text-emerald-300" size={34} />
                 </div>
-                <h1 className="text-4xl font-black tracking-tight sm:text-5xl">
-                  ForgeAndPlay <span className="bg-gradient-to-r from-emerald-300 to-cyan-300 bg-clip-text text-transparent">Quiz</span>
+
+                <h1 className="text-5xl font-black tracking-tight">
+                  ForgeAndPlay{" "}
+                  <span className="bg-gradient-to-r from-emerald-300 to-cyan-300 bg-clip-text text-transparent">
+                    Quiz
+                  </span>
                 </h1>
-                <p className="mt-4 max-w-md text-sm leading-7 text-slate-300 sm:text-base">
-                  2026 stilinde akıcı, enerjik ve keyif veren çok oyunculu quiz deneyimi. Tablet, mobil ve masaüstünde hızlı çalışır.
+
+                <p className="mt-5 max-w-md text-base leading-8 text-slate-300">
+                  Akıcı, modern ve mobil uyumlu çok oyunculu bilgi yarışması deneyimi.
                 </p>
-                <div className="mt-8 grid gap-3 sm:grid-cols-3">
+
+                <div className="mt-8 grid grid-cols-3 gap-3">
                   {[
-                    { icon: Orbit, title: "Canlı oda", text: "Kod ile hızlı katılım" },
-                    { icon: Wand2, title: "Akıllı soru akışı", text: "Yaşa ve tura göre" },
-                    { icon: Layers3, title: "Trend arayüz", text: "Mobil uyumlu" },
-                  ].map((item) => (
-                    <div key={item.title} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                      <item.icon size={18} className="mb-2 text-emerald-300" />
-                      <div className="font-semibold">{item.title}</div>
-                      <div className="mt-1 text-xs text-slate-400">{item.text}</div>
+                    ["Canlı oda", "Kod ile giriş"],
+                    ["Akıllı soru", "Yaşa göre akış"],
+                    ["Trend arayüz", "Mobil uyumlu"],
+                  ].map(([title, text]) => (
+                    <div
+                      key={title}
+                      className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                    >
+                      <div className="font-semibold">{title}</div>
+                      <div className="mt-2 text-xs text-slate-400">{text}</div>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="p-6 sm:p-8">
-                <div className="space-y-5">
+              <div className="p-4 sm:p-6 lg:p-8">
+                <div className="mb-4 text-center lg:hidden">
+                  <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3">
+                    <Trophy className="text-emerald-300" size={28} />
+                  </div>
+                  <h1 className="text-4xl font-black tracking-tight">
+                    ForgeAndPlay{" "}
+                    <span className="bg-gradient-to-r from-emerald-300 to-cyan-300 bg-clip-text text-transparent">
+                      Quiz
+                    </span>
+                  </h1>
+                </div>
+
+                <div className="space-y-4">
                   <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-300">Oyuncu adı</label>
+                    <label className="mb-2 block text-sm font-medium text-slate-300">
+                      Oyuncu adı
+                    </label>
                     <input
+                      ref={nameInputRef}
+                      autoFocus
                       type="text"
                       value={userName}
                       onChange={(e) => setUserName(e.target.value)}
@@ -2822,9 +3061,13 @@ export default function App() {
 
                   <div>
                     <div className="mb-2 text-sm font-medium text-slate-300">Tur sayısı</div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex gap-2">
                       {ROUND_OPTIONS.map((round) => (
-                        <SelectChip key={round} active={roundCount === round} onClick={() => setRoundCount(round)}>
+                        <SelectChip
+                          key={round}
+                          active={roundCount === round}
+                          onClick={() => setRoundCount(round)}
+                        >
                           {round} Tur
                         </SelectChip>
                       ))}
@@ -2833,9 +3076,13 @@ export default function App() {
 
                   <div>
                     <div className="mb-2 text-sm font-medium text-slate-300">Yaş aralığı</div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                       {AGE_BRACKETS.map((age) => (
-                        <SelectChip key={age} active={selectedAgeBracket === age} onClick={() => setSelectedAgeBracket(age)}>
+                        <SelectChip
+                          key={age}
+                          active={selectedAgeBracket === age}
+                          onClick={() => setSelectedAgeBracket(age)}
+                        >
                           {age}
                         </SelectChip>
                       ))}
@@ -2843,7 +3090,12 @@ export default function App() {
                   </div>
 
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
-                    Zorluk akışı: <span className="font-semibold text-emerald-300">1-5 tur: 2</span> • <span className="font-semibold text-cyan-300">6-10 tur: 3</span> • <span className="font-semibold text-fuchsia-300">11-20 tur: 4</span>
+                    Zorluk akışı:
+                    <span className="font-semibold text-emerald-300"> 1-5 tur: 2</span>
+                    <span className="text-slate-500"> • </span>
+                    <span className="font-semibold text-cyan-300">6-10 tur: 3</span>
+                    <span className="text-slate-500"> • </span>
+                    <span className="font-semibold text-fuchsia-300">11-20 tur: 4</span>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -2854,6 +3106,7 @@ export default function App() {
                     >
                       <Play size={18} /> Demo Modu
                     </button>
+
                     <button
                       onClick={() => createRoom(false)}
                       disabled={!userName.trim()}
@@ -2880,7 +3133,11 @@ export default function App() {
                     </button>
                   </div>
 
-                  {errorMessage && <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">{errorMessage}</div>}
+                  {errorMessage && (
+                    <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">
+                      {errorMessage}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -2893,27 +3150,39 @@ export default function App() {
   if (roomData.state === PHASES.LOBBY) {
     return (
       <AppFrame>
-        <div className="mx-auto max-w-5xl py-6">
+        <div className="mx-auto max-w-5xl py-4 sm:py-6">
           <Header />
-          <GlassCard className="p-6 sm:p-8">
-            <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+
+          <GlassCard className="p-5 sm:p-8">
+            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2 className="text-3xl font-black">Oyun Lobisi</h2>
-                <p className="mt-2 text-slate-400">Host tur sayısını ve yaş aralığını belirledi. Her turda zorluk kademe kademe artar.</p>
+                <p className="mt-2 text-slate-400">
+                  Yaş aralığı ve tur ayarı yapıldı. Zorluk ilerledikçe artacak.
+                </p>
               </div>
+
               <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
-                {roomData.settings.maxRounds} tur • yaş {roomData.settings.ageBracket} • süre {roomData.settings.timePerQuestion} sn
+                {roomData.settings.maxRounds} tur • yaş {roomData.settings.ageBracket} •{" "}
+                {roomData.settings.timePerQuestion} sn
               </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {Object.entries(roomData.players || {}).map(([id, p]) => (
-                <div key={id} className="rounded-3xl border border-white/10 bg-slate-950/40 p-5 transition hover:bg-white/5">
+                <div
+                  key={id}
+                  className="rounded-3xl border border-white/10 bg-slate-950/40 p-5"
+                >
                   <div className="flex items-center gap-4">
-                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/5 text-3xl">{p.avatar}</div>
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/5 text-3xl">
+                      {p.avatar}
+                    </div>
                     <div>
                       <div className="text-lg font-bold">{p.name}</div>
-                      <div className="text-sm text-slate-400">{id === roomData.hostId ? "Host" : p.isBot ? "Bot" : "Oyuncu"}</div>
+                      <div className="text-sm text-slate-400">
+                        {id === roomData.hostId ? "Host" : p.isBot ? "Bot" : "Oyuncu"}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2928,7 +3197,9 @@ export default function App() {
                 OYUNU BAŞLAT
               </button>
             ) : (
-              <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-4 text-center text-slate-300 animate-pulse">Host'un başlatması bekleniyor...</div>
+              <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-4 text-center text-slate-300 animate-pulse">
+                Host'un başlatması bekleniyor...
+              </div>
             )}
           </GlassCard>
         </div>
@@ -2939,18 +3210,26 @@ export default function App() {
   if (roomData.state === PHASES.VOTING) {
     return (
       <AppFrame>
-        <div className="mx-auto max-w-5xl py-6">
+        <div className="mx-auto max-w-5xl py-4 sm:py-6">
           <Header />
-          <div className="mb-6 flex items-center justify-center gap-3 text-center text-5xl font-black text-emerald-300 sm:text-6xl">
+
+          <div className="mb-4 flex items-center justify-center gap-3 text-center text-5xl font-black text-emerald-300 sm:text-6xl">
             <Clock size={42} /> {timeLeft}
           </div>
-          <GlassCard className="p-6 sm:p-8">
+
+          <GlassCard className="p-5 sm:p-8">
             <div className="text-center">
               <h2 className="text-3xl font-black sm:text-4xl">Kategori Seçimi</h2>
-              <p className="mt-3 text-slate-400">Bu tur için kategori belirleniyor. Zorluk seviyesi: {getTargetDifficulty(roomData.currentRound || 1)}</p>
+              <p className="mt-3 text-slate-400">
+                Bu tur için kategori belirleniyor. Zorluk seviyesi:{" "}
+                {getTargetDifficulty(roomData.currentRound || 1)}
+              </p>
             </div>
+
             {roomData.votes?.[user.uid] ? (
-              <div className="mt-8 rounded-3xl border border-amber-400/20 bg-amber-400/10 p-8 text-center text-2xl font-bold text-amber-300 animate-pulse">Bekleniyor...</div>
+              <div className="mt-8 rounded-3xl border border-amber-400/20 bg-amber-400/10 p-8 text-center text-2xl font-bold text-amber-300 animate-pulse">
+                Bekleniyor...
+              </div>
             ) : (
               <div className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-3">
                 {CATEGORIES.map((cat) => (
@@ -2973,7 +3252,7 @@ export default function App() {
   if (roomData.state === PHASES.LOADING_QUESTION) {
     return (
       <AppFrame>
-        <div className="flex min-h-[80vh] items-center justify-center">
+        <div className="flex min-h-[80dvh] items-center justify-center">
           <GlassCard className="p-10 text-center">
             <Sparkles className="mx-auto mb-4 animate-spin text-emerald-400" size={48} />
             <h2 className="text-2xl font-black">Yapay zeka soru hazırlıyor...</h2>
@@ -2984,26 +3263,43 @@ export default function App() {
   }
 
   if (roomData.state === PHASES.QUESTION) {
-    const sourceLabel = roomData.currentQuestionSource?.includes("gemini") ? "Gemini" : "Yerel Havuz";
+    const sourceLabel =
+      roomData.currentQuestionSource?.includes("gemini") ? "Gemini" : "Yerel Havuz";
 
     return (
       <AppFrame>
-        <div className="mx-auto max-w-5xl py-6">
+        <div className="mx-auto max-w-5xl py-4 sm:py-6">
           <Header />
-          <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
+          <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-2xl bg-indigo-500/20 px-4 py-2 font-bold text-indigo-200">{roomData.currentQuestion.category}</span>
-              <span className="rounded-2xl bg-white/5 px-4 py-2 text-sm text-slate-300">Kaynak: {sourceLabel}</span>
-              <span className="rounded-2xl bg-white/5 px-4 py-2 text-sm text-slate-300">Zorluk: {getTargetDifficulty(roomData.currentRound || 1)}</span>
+              <span className="rounded-2xl bg-indigo-500/20 px-4 py-2 font-bold text-indigo-200">
+                {roomData.currentQuestion.category}
+              </span>
+              <span className="rounded-2xl bg-white/5 px-4 py-2 text-sm text-slate-300">
+                Kaynak: {sourceLabel}
+              </span>
+              <span className="rounded-2xl bg-white/5 px-4 py-2 text-sm text-slate-300">
+                Zorluk: {getTargetDifficulty(roomData.currentRound || 1)}
+              </span>
             </div>
-            <div className={`text-5xl font-black ${timeLeft <= 5 ? "text-red-400 animate-pulse" : "text-emerald-300"}`}>{timeLeft}</div>
+
+            <div
+              className={`text-5xl font-black ${
+                timeLeft <= 5 ? "text-red-400 animate-pulse" : "text-emerald-300"
+              }`}
+            >
+              {timeLeft}
+            </div>
           </div>
 
-          <GlassCard className="mb-6 p-6 sm:p-8">
-            <h2 className="text-center text-2xl font-black leading-tight sm:text-4xl">{roomData.currentQuestion.text}</h2>
+          <GlassCard className="mb-5 p-6 sm:p-8">
+            <h2 className="text-center text-2xl font-black leading-tight sm:text-4xl">
+              {roomData.currentQuestion.text}
+            </h2>
           </GlassCard>
 
-          <div className="mb-6 flex justify-center">
+          <div className="mb-5 flex justify-center">
             <button
               onClick={useJokerFiftyFifty}
               disabled={jokers.fiftyFifty === 0 || !!roomData.answers?.[user.uid]}
@@ -3016,10 +3312,17 @@ export default function App() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {roomData.currentQuestion.options.map((opt, idx) => {
               if (hiddenOptions.includes(idx)) {
-                return <div key={idx} className="h-[92px] rounded-3xl border border-white/10 bg-white/5 opacity-20" />;
+                return (
+                  <div
+                    key={idx}
+                    className="h-[92px] rounded-3xl border border-white/10 bg-white/5 opacity-20"
+                  />
+                );
               }
+
               const isSelected = roomData.answers?.[user.uid]?.optionIndex === idx;
               const locked = !!roomData.answers?.[user.uid];
+
               return (
                 <button
                   key={idx}
@@ -3033,7 +3336,9 @@ export default function App() {
                       : "border-white/10 bg-slate-950/40 hover:scale-[1.01] hover:border-emerald-400/30 hover:bg-white/5"
                   }`}
                 >
-                  <span className="mr-3 inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/10 text-slate-300 group-hover:bg-emerald-400/20 group-hover:text-emerald-200">{["A", "B", "C", "D"][idx]}</span>
+                  <span className="mr-3 inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/10 text-slate-300 group-hover:bg-emerald-400/20 group-hover:text-emerald-200">
+                    {["A", "B", "C", "D"][idx]}
+                  </span>
                   {opt}
                 </button>
               );
@@ -3047,26 +3352,45 @@ export default function App() {
   if (roomData.state === PHASES.REVEAL) {
     const q = roomData.currentQuestion;
     const isCorrect = roomData.answers?.[user.uid]?.optionIndex === q.correctIndex;
+
     return (
       <AppFrame>
-        <div className="mx-auto flex min-h-[80vh] max-w-5xl items-center justify-center py-6">
+        <div className="mx-auto flex min-h-[80dvh] max-w-5xl items-center justify-center py-4 sm:py-6">
           <GlassCard className="w-full p-6 sm:p-8">
-            <h1 className={`mb-6 text-center text-5xl font-black ${isCorrect ? "text-emerald-300" : "text-red-400"}`}>{isCorrect ? "DOĞRU!" : "YANLIŞ!"}</h1>
+            <h1
+              className={`mb-6 text-center text-5xl font-black ${
+                isCorrect ? "text-emerald-300" : "text-red-400"
+              }`}
+            >
+              {isCorrect ? "DOĞRU!" : "YANLIŞ!"}
+            </h1>
+
             <div className="mb-6 rounded-3xl border border-white/10 bg-white/5 p-6">
               <h2 className="text-center text-2xl font-black sm:text-3xl">{q.text}</h2>
             </div>
+
             <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
               {q.options.map((opt, idx) => {
                 const isThisCorrect = idx === q.correctIndex;
                 return (
-                  <div key={idx} className={`rounded-3xl border p-5 text-lg font-bold ${isThisCorrect ? "border-emerald-300 bg-emerald-400 text-slate-950" : "border-white/10 bg-white/5 opacity-50"}`}>
+                  <div
+                    key={idx}
+                    className={`rounded-3xl border p-5 text-lg font-bold ${
+                      isThisCorrect
+                        ? "border-emerald-300 bg-emerald-400 text-slate-950"
+                        : "border-white/10 bg-white/5 opacity-50"
+                    }`}
+                  >
                     {opt}
                   </div>
                 );
               })}
             </div>
+
             <div className="rounded-3xl border border-indigo-400/20 bg-indigo-400/10 p-5 text-slate-200">
-              <div className="mb-2 flex items-center gap-2 font-bold text-indigo-200"><Brain size={18} /> Kısa Açıklama</div>
+              <div className="mb-2 flex items-center gap-2 font-bold text-indigo-200">
+                <Brain size={18} /> Kısa Açıklama
+              </div>
               <p>{q.explanationShort}</p>
             </div>
           </GlassCard>
@@ -3078,24 +3402,40 @@ export default function App() {
   if (roomData.state === PHASES.SCOREBOARD) {
     return (
       <AppFrame>
-        <div className="mx-auto max-w-3xl py-6">
+        <div className="mx-auto max-w-3xl py-4 sm:py-6">
           <Header />
-          <GlassCard className="p-6 sm:p-8">
+
+          <GlassCard className="p-5 sm:p-8">
             <h2 className="mb-6 text-center text-4xl font-black">Puan Durumu</h2>
+
             <div className="space-y-4">
               {Object.entries(roomData.players || {})
                 .map(([id, p]) => ({ id, ...p }))
                 .sort((a, b) => b.score - a.score)
                 .map((p, idx) => (
-                  <div key={p.id} className={`flex items-center justify-between rounded-3xl border p-5 ${p.id === user.uid ? "border-indigo-400/30 bg-indigo-500/10" : "border-white/10 bg-white/5"}`}>
+                  <div
+                    key={p.id}
+                    className={`flex items-center justify-between rounded-3xl border p-5 ${
+                      p.id === user.uid
+                        ? "border-indigo-400/30 bg-indigo-500/10"
+                        : "border-white/10 bg-white/5"
+                    }`}
+                  >
                     <div className="flex items-center gap-4">
-                      <div className="w-8 text-center text-2xl font-black text-slate-500">#{idx + 1}</div>
+                      <div className="w-8 text-center text-2xl font-black text-slate-500">
+                        #{idx + 1}
+                      </div>
                       <div className="text-3xl">{p.avatar}</div>
                       <div>
                         <div className="text-xl font-bold">{p.name}</div>
-                        {p.streak >= 3 && <div className="text-xs font-bold text-amber-300"><Flame size={12} className="mr-1 inline" /> {p.streak} Seri</div>}
+                        {p.streak >= 3 && (
+                          <div className="text-xs font-bold text-amber-300">
+                            <Flame size={12} className="mr-1 inline" /> {p.streak} Seri
+                          </div>
+                        )}
                       </div>
                     </div>
+
                     <div className="text-3xl font-black text-emerald-300">{p.score}</div>
                   </div>
                 ))}
@@ -3109,16 +3449,25 @@ export default function App() {
   if (roomData.state === PHASES.END) {
     return (
       <AppFrame>
-        <div className="mx-auto flex min-h-[80vh] max-w-3xl items-center justify-center py-6">
+        <div className="mx-auto flex min-h-[80dvh] max-w-3xl items-center justify-center py-4 sm:py-6">
           <GlassCard className="w-full p-6 text-center sm:p-8">
             <Trophy size={82} className="mx-auto mb-5 text-amber-300" />
             <h1 className="mb-3 text-5xl font-black">OYUN BİTTİ!</h1>
-            <p className="mb-8 text-slate-400">Skor kartını paylaşabilir ve yeni oyuna dönebilirsin.</p>
+            <p className="mb-8 text-slate-400">
+              Skor kartını paylaşabilir ve yeni oyuna dönebilirsin.
+            </p>
+
             <div className="mx-auto mb-8 max-w-sm rounded-3xl border border-white/10 bg-white/5 p-5">
-              <h3 className="mb-4 flex justify-center gap-2 text-center font-bold text-slate-300"><Share2 size={18} /> Skor Kartın</h3>
+              <h3 className="mb-4 flex justify-center gap-2 text-center font-bold text-slate-300">
+                <Share2 size={18} /> Skor Kartın
+              </h3>
               <canvas ref={canvasRef} width={400} height={250} className="w-full rounded-2xl" />
             </div>
-            <button onClick={() => window.location.reload()} className="rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-400 px-8 py-4 font-black text-slate-950 transition hover:scale-[1.01]">
+
+            <button
+              onClick={() => window.location.reload()}
+              className="rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-400 px-8 py-4 font-black text-slate-950 transition hover:scale-[1.01]"
+            >
               Ana Menüye Dön
             </button>
           </GlassCard>
